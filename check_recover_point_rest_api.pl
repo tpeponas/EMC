@@ -39,7 +39,7 @@ sub get_snapshot_status {
     # On vérifier qu'il est dien dans le Dernier RPO localtime - RPO < Snaptime
     # rpo en second
 
-    my ($group_id,$cluster_id,$rpo)=@_;
+    my ($group_id,$cluster_id,$rpo,$gp_name)=@_;
     my $journal_state='UNKNOW';
     
     # On controle si la copie est en distributing
@@ -51,6 +51,10 @@ sub get_snapshot_status {
 
     foreach(@{$json->{'innerSet'}}) {
 	if ($group_id == $_->{'groupUID'}{'id'}) {
+	    if ($debug) {
+		print Dumper($json);
+	    }
+	    
 	    foreach(@{$_->{'groupCopiesState'}}) {
 		if ($cluster_id == $_->{'copyUID'}{'globalCopyUID'}{'clusterUID'}{'id'}) {
 		    $journal_state=$_->{'journalState'};
@@ -74,19 +78,19 @@ sub get_snapshot_status {
 	my $now_epoch=time;
 
 	my $datestring = localtime($epoch);
-	printf( "Last Snapshot time for $group_name : $datestring RPO : $rpo second:");
+	printf( "Last Snapshot time for $gp_name : $datestring RPO : $rpo second:");
 	
 	if ($now_epoch-$epoch < $rpo ) {
 	    printf("OK \n");
-	    exit $STATU_EXIT{'OK'};
+	    if ($group_name !~ /ALL/) {exit $STATU_EXIT{'OK'}; }
 	} else {
 	    printf("WARNING \n");
-	    exit $STATUS_EXIT{'WARNING'};
+	    if ($group_name !~ /ALL/) {exit $STATUS_EXIT{'WARNING'};}
 	}
 	
     } else {
-	printf(" $group_name is in $journal_state state : WARNING\n");
-	exit $STATUS_EXIT{'WARNING'};
+	printf(" $gp_name is in $journal_state state : WARNING\n");
+	if  ($group_name !~ /ALL/) {exit $STATUS_EXIT{'WARNING'};}
     }
     
 }
@@ -103,10 +107,11 @@ sub get_snapshots_status {
     my $json = JSON->new->utf8->decode($content);
 
     foreach(@{$json->{'innerSet'}}) {
-	if ($_->{'name'} =~ /$group_name/) {
+	my $gp_name=$_->{'name'};
+	if ($group_name =~ /ALL/ || $_->{'name'} =~ /$group_name/) {
 
 	    $found_gp=1;
-
+	    
 	    my $group_id=$_->{'groupUID'}{'id'};
 	    my $rpo=int($_->{'activeLinksSettings'}[0]{'linkPolicy'}{'protectionPolicy'}{'rpoPolicy'}{'maximumAllowedLag'}{'value'}/1000000);
 
@@ -119,7 +124,7 @@ sub get_snapshots_status {
 		    }
 
 		    # On recupere les images snapshots du group $group_id sur le cluster $cluster_id
-		    get_snapshot_status($group_id,$cluster_id,$rpo);
+		    get_snapshot_status($group_id,$cluster_id,$rpo,$gp_name);
 		}
 	    }
 	}
