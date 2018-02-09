@@ -40,30 +40,53 @@ sub get_snapshot_status {
     # rpo en second
 
     my ($group_id,$cluster_id,$rpo)=@_;
+    my $journal_state='UNKNOW';
+    
+    # On controle si la copie est en distributing
 
-    my $req = HTTP::Request->new(GET => "https://$cluster/fapi/rest/$RP_Version/groups/$group_id/clusters/$cluster_id/copies/0/snapshots");
+    my $req = HTTP::Request->new(GET => "https://$cluster/fapi/rest/$RP_Version/groups/state");
     $req->authorization_basic($username,$password);
     my $content= $ua->request($req)->content;
     my $json = JSON->new->utf8->decode($content);
-    
-    if ($debug) {
-	print Dumper($json);
+
+    foreach(@{$json->{'innerSet'}}) {
+	if ($group_id == $_->{'groupUID'}{'id'}) {
+	    foreach(@{$_->{'groupCopiesState'}}) {
+		if ($cluster_id == $_->{'copyUID'}{'globalCopyUID'}{'clusterUID'}{'id'}) {
+		    $journal_state=$_->{'journalState'};
+		}
+	    }	    
+	}
     }
 
-    #    my $dt=DateTime->from_epoch( epoch => $json->{'earliest'}{'timeInMicroSeconds'});
-    my $epoch=int($json->{'latest'}{'timeInMicroSeconds'}/1000000);
-    my $now_epoch=time;
+    if ($journal_state =~ /DISTRIBUTING/ ) {
+    
+	$req = HTTP::Request->new(GET => "https://$cluster/fapi/rest/$RP_Version/groups/$group_id/clusters/$cluster_id/copies/0/snapshots");
+	$req->authorization_basic($username,$password);
+	$content= $ua->request($req)->content;
+	$json = JSON->new->utf8->decode($content);
+	
+	if ($debug) {
+	    print Dumper($json);
+	}
 
-    my $datestring = localtime($epoch);
-    printf( "Last Snapshot time for $group_name : $datestring RPO : $rpo second:");
+	my $epoch=int($json->{'latest'}{'timeInMicroSeconds'}/1000000);
+	my $now_epoch=time;
 
-    if ($now_epoch-$epoch < $rpo ) {
-	printf("OK \n");
-	exit $STATU_EXIT{'OK'};
+	my $datestring = localtime($epoch);
+	printf( "Last Snapshot time for $group_name : $datestring RPO : $rpo second:");
+	
+	if ($now_epoch-$epoch < $rpo ) {
+	    printf("OK \n");
+	    exit $STATU_EXIT{'OK'};
+	} else {
+	    printf("WARNING \n");
+	    exit $STATUS_EXIT{'WARNING'};
+	}
+	
     } else {
-	printf("WARNING \n");
+	printf(" $group_name is in $journal_state state : WARNING\n");
 	exit $STATUS_EXIT{'WARNING'};
-
     }
     
 }
@@ -87,10 +110,6 @@ sub get_snapshots_status {
 	    my $group_id=$_->{'groupUID'}{'id'};
 	    my $rpo=int($_->{'activeLinksSettings'}[0]{'linkPolicy'}{'protectionPolicy'}{'rpoPolicy'}{'maximumAllowedLag'}{'value'}/1000000);
 
-	    # Ajout Vérification de l'etat du CG (Actif, INIT ...)
-	    # Si en INIT => Warnign , pas la peine d'aller chercher le derbnier snap 
-
-	    
 	    my @cgs=@{$_->{'groupCopiesSettings'}};
 	    foreach(@cgs) {
 		if ($_->{'roleInfo'}{'role'} =~ /REPLICA/) {
@@ -98,9 +117,9 @@ sub get_snapshots_status {
 		    if ($debug)  {
 			print $_->{'name'}.":".$group_id.": Cluster:".$cluster_id."\n";
 		    }
-		    
-			# On recupere les images snapshots du group $group_id sur le cluster $cluster_id
-			get_snapshot_status($group_id,$cluster_id,$rpo);
+
+		    # On recupere les images snapshots du group $group_id sur le cluster $cluster_id
+		    get_snapshot_status($group_id,$cluster_id,$rpo);
 		}
 	    }
 	}
